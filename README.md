@@ -16,7 +16,9 @@ A simple web tool to test CORS (Cross-Origin Resource Sharing) headers of any UR
 
 Open the tool in your browser:
 
-[Normal CORS Tester on Vercel]((https://cors-indol-theta.vercel.app/))
+[Normal CORS Tester on Vercel]
+
+Testing URL: https://cors-indol-theta.vercel.app/
 
 1. Enter the full URL you want to test.
 2. Click **Send**.
