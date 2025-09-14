@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Check CORS Misconfiguration with Origin</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f1724; --card:#0b1220; --muted:#9aa4b2; --accent:#4ade80;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace;
+    }
+    body{ margin:0; min-height:100vh; background:var(--bg); color:#e6eef8; font-family:Inter, system-ui, Arial; padding:20px; }
+    h1{ margin:0 0 12px 0; color:var(--accent); }
+    .top { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+    input[type="text"], select { padding:10px; border-radius:8px; border:1px solid #24303f; background:#071025; color:#fff; min-width:220px; }
+    button { padding:10px 14px; border-radius:8px; border:none; background:var(--accent); color:#042012; cursor:pointer; font-weight:600; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:18px; align-items:start; margin-top:12px; }
+    .card { background:var(--card); padding:12px; border-radius:10px; box-shadow:0 4px 18px rgba(0,0,0,0.6); min-height:120px; }
+    .card h3{ margin:0 0 8px 0; color:#cfead1; font-size:14px; }
+    pre { background:transparent; border-radius:6px; padding:12px; overflow:auto; max-height:560px; white-space:pre-wrap; word-break:break-word; color:#e6eef8; }
+    .status { font-weight:700; margin-bottom:8px; display:flex; gap:10px; align-items:center; }
+    .status .code { padding:6px 10px; border-radius:6px; background:#071a11; color:var(--accent); font-family:var(--mono); }
+    .headers-list { font-family:var(--mono); font-size:13px; color:#cfead1; white-space:pre-wrap; }
+    /* body code styling */
+    .body-code {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: #dbeafe;
+      background: #021021;
+      padding: 12px;
+      border-radius: 8px;
+      white-space: pre-wrap;   /* allow wrapping */
+      word-wrap: break-word;   /* break long words if needed */
+      overflow-x: auto;        /* scroll horizontally only if needed */
+    }
+    .muted { color:var(--muted); font-size:13px; }
+    /* responsive */
+    @media (max-width:900px){ .grid{ grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <center>
+    <h1>CORS Misconfiguration with Origin Response</h1>
+  </center>
+  <div style="display: flex; justify-content: center; align-items: center; padding-top: 20px;">
+    <div class="top">
+      <input id="url" type="text" placeholder="Enter full URL (https://...)" />
+      <select id="method" title="HTTP method">
+        <option>GET</option><option>HEAD</option><option>OPTIONS</option>
+        <option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option>
+      </select>
+      <input id="origin" type="text" placeholder="Origin to spoof (optional) e.g. https://evil.com" />
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <div class="status" id="statusBox">
+        <div class="muted">Status:</div>
+        <div class="code" id="statusCode">-</div>
+        <div id="statusText" class="muted"></div>
+      </div>
+
+      <h3>Response Headers</h3>
+      <div class="headers-list" id="headersBox">-</div>
+    </div>
+
+    <div class="card">
+      <h3>Response Body</h3>
+      <div id="bodyBox" class="body-code">-</div>
+    </div>
+  </div>
+
+<script>
+document.getElementById('sendBtn').addEventListener('click', sendRequest);
+
+function formatBody(body, contentType) {
+  // JSON pretty print
+  if (contentType.includes("application/json")) {
+    try {
+      const json = JSON.parse(body);
+      return JSON.stringify(json, null, 2);
+    } catch {
+      return body;
+    }
+  }
+
+  // Basic HTML/XML indentation
+  if (
+    contentType.includes("text/html") ||
+    contentType.includes("application/xml") ||
+    contentType.includes("text/xml")
+  ) {
+    return beautifyHTML(body);
+  }
+
+  return body;
+}
+
+function beautifyHTML(html) {
+  const tab = "  ";
+  let result = "";
+  let indent = 0;
+
+  html
+    .replace(/>\s+</g, "><")
+    .split(/></)
+    .forEach((element, i, arr) => {
+      if (i > 0) element = "<" + element;
+      if (i < arr.length - 1) element = element + ">";
+
+      if (element.match(/^<\/\w/)) indent--;
+      result += tab.repeat(indent) + element + "\n";
+      if (element.match(/^<\w[^>]*[^/]>/)) indent++;
+    });
+
+  return result;
+}
+
+async function sendRequest(){
+  const url = document.getElementById('url').value.trim();
+  const method = document.getElementById('method').value;
+  const origin = document.getElementById('origin').value.trim();
+
+  // reset UI
+  document.getElementById('statusCode').innerText = '...';
+  document.getElementById('statusText').innerText = '';
+  document.getElementById('headersBox').innerText = 'Loading...';
+  document.getElementById('bodyBox').innerText = 'Loading...';
+
+  if(!url){
+    document.getElementById('headersBox').innerText = '';
+    document.getElementById('bodyBox').innerText = 'Please enter a URL.';
+    document.getElementById('statusCode').innerText = '-';
+    return;
+  }
+
+  try {
+    const res = await fetch('/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, method, origin })
+    });
+
+    // if backend returned non-JSON, show raw
+    const text = await res.text();
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch(e) {
+      // backend didn't return JSON (unexpected). show raw response.
+      document.getElementById('statusCode').innerText = res.status + '';
+      document.getElementById('statusText').innerText = res.statusText || '';
+      document.getElementById('headersBox').innerText = 'Unexpected non-JSON response from server:';
+      document.getElementById('bodyBox').innerText = text;
+      return;
+    }
+
+    if(data.error){
+      document.getElementById('statusCode').innerText = 'Error';
+      document.getElementById('statusText').innerText = data.error;
+      document.getElementById('headersBox').innerText = '-';
+      document.getElementById('bodyBox').innerText = '';
+      return;
+    }
+
+    // Show status
+    document.getElementById('statusCode').innerText = data.status || '-';
+    document.getElementById('statusText').innerText = data.statusText || '';
+
+    // Show headers in key: value per line
+    const headersObj = data.headers || {};
+    if(Object.keys(headersObj).length === 0){
+      document.getElementById('headersBox').innerText = '(no headers)';
+    } else {
+      const lines = [];
+      for (const k of Object.keys(headersObj)) {
+        lines.push(`${k}: ${headersObj[k]}`);
+      }
+      document.getElementById('headersBox').textContent = lines.join("\n");
+    }
+
+    // Beautify body: prefer JSON if possible
+    const bodyText = data.body === undefined || data.body === null ? '' : String(data.body);
+    const ct = (data.contentType || '').toLowerCase();
+
+    let pretty = formatBody(bodyText, ct);
+    // Try JSON if content-type says json, or if it parses
+    if(ct.includes('application/json')){
+      try {
+        pretty = JSON.stringify(JSON.parse(bodyText), null, 2);
+      } catch(e) { /* fallback to raw text */ }
+    } else {
+      // try to detect JSON even without content-type
+      try {
+        const maybe = JSON.parse(bodyText);
+        pretty = JSON.stringify(maybe, null, 2);
+      } catch(e){}
+    }
+
+    // Set body (preserve newlines & monospace)
+    document.getElementById('bodyBox').innerText = pretty || '(empty)';
+  } catch (err){
+    document.getElementById('statusCode').innerText = 'Error';
+    document.getElementById('statusText').innerText = err.message;
+    document.getElementById('headersBox').innerText = '';
+    document.getElementById('bodyBox').innerText = '';
+  }
+}
+</script>
+</body>
+</html>
